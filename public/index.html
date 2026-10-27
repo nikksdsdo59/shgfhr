@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Venice Panel</title>
+<style>
+  :root{--bg:#0d0f14;--card:#161a22;--line:#232a36;--txt:#e6e9ef;--mut:#8b93a3;--acc:#6c8cff;--ok:#2ecc71;--bad:#e74c3c}
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--txt)}
+  .wrap{max-width:1100px;margin:0 auto;padding:24px}
+  h1{font-size:20px;margin:0 0 16px}
+  h3{font-size:15px;margin:0 0 12px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:18px}
+  input,button{font:inherit;padding:9px 11px;border-radius:8px;border:1px solid var(--line);background:#0f131a;color:var(--txt)}
+  button{background:var(--acc);border-color:var(--acc);color:#fff;cursor:pointer}
+  button.ghost{background:transparent;color:var(--txt);border-color:var(--line)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:left;padding:8px;border-bottom:1px solid var(--line)}
+  th{color:var(--mut);font-weight:600}
+  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .mut{color:var(--mut)} .ok{color:var(--ok)} .bad{color:var(--bad)}
+  pre{background:#0f131a;border:1px solid var(--line);border-radius:8px;padding:12px;max-height:220px;overflow:auto}
+  .hide{display:none} code{color:#9ecbff}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="loginView" class="card" style="max-width:380px;margin:60px auto">
+    <h1>Venice Panel — Admin</h1>
+    <div class="row" style="flex-direction:column;align-items:stretch">
+      <input id="aUser" placeholder="Utilisateur" value="admin"/>
+      <input id="aPass" type="password" placeholder="Mot de passe"/>
+      <button onclick="adminLogin()">Connexion</button>
+      <div id="loginMsg" class="mut"></div>
+    </div>
+  </div>
+
+  <div id="dashView" class="hide">
+    <h1>Venice Panel</h1>
+
+    <div class="card">
+      <h3>Generer des cles</h3>
+      <div class="row">
+        <input id="gCount" type="number" value="10" min="1" max="1000" style="width:90px" title="Nombre"/>
+        <input id="gDays" type="number" value="30" min="0" style="width:110px" title="Duree en jours (0 = illimite)"/>
+        <input id="gNote" placeholder="Note (ex: VIP)" style="flex:1;min-width:160px"/>
+        <button onclick="genKeys()">Generer</button>
+        <button class="ghost" onclick="loadKeys()">Rafraichir</button>
+      </div>
+      <pre id="genOut" class="hide"></pre>
+    </div>
+
+    <div class="card">
+      <h3>Cles <span id="keyCount" class="mut"></span></h3>
+      <table><thead><tr><th>#</th><th>Cle</th><th>Duree</th><th>Expire</th><th>Utilisee par</th><th>Note</th><th></th></tr></thead>
+      <tbody id="keysBody"></tbody></table>
+    </div>
+
+    <div class="card">
+      <h3>Utilisateurs</h3>
+      <table><thead><tr><th>#</th><th>Pseudo</th><th>HWID</th><th>Cle</th><th>Expire</th><th>Statut</th><th></th></tr></thead>
+      <tbody id="usersBody"></tbody></table>
+    </div>
+  </div>
+</div>
+
+<script>
+let TOKEN = localStorage.getItem('vtoken') || '';
+const $ = s => document.querySelector(s);
+const api = (p,o={}) => fetch(p,{...o,headers:{'Content-Type':'application/json','x-admin-token':TOKEN,...(o.headers||{})}}).then(r=>r.json());
+
+async function adminLogin(){
+  const r = await api('/api/admin/login',{method:'POST',body:JSON.stringify({username:$('#aUser').value,password:$('#aPass').value})});
+  if(!r.ok){ $('#loginMsg').innerHTML='<span class="bad">'+r.error+'</span>'; return; }
+  TOKEN=r.token; localStorage.setItem('vtoken',TOKEN); showDash();
+}
+function showDash(){ $('#loginView').classList.add('hide'); $('#dashView').classList.remove('hide'); loadKeys(); loadUsers(); }
+
+async function genKeys(){
+  const r = await api('/api/admin/keys',{method:'POST',body:JSON.stringify({count:+$('#gCount').value,duration_days:+$('#gDays').value,note:$('#gNote').value})});
+  if(!r.ok) return alert(r.error);
+  const out=$('#genOut'); out.classList.remove('hide'); out.textContent=r.keys.join('\n'); loadKeys();
+}
+async function loadKeys(){
+  const r = await api('/api/admin/keys'); if(!r.ok) return;
+  $('#keyCount').textContent='('+r.keys.length+')';
+  $('#keysBody').innerHTML = r.keys.map(k=>`<tr>
+    <td>${k.id}</td><td><code>${k.key}</code></td>
+    <td>${k.duration_days>0?k.duration_days+' j':'illimite'}</td>
+    <td class="mut">${k.expires_at?new Date(k.expires_at).toLocaleDateString():'-'}</td>
+    <td>${k.used_by_name?'<span class="ok">'+k.used_by_name+'</span>':'<span class="mut">libre</span>'}</td>
+    <td class="mut">${k.note||''}</td>
+    <td><button class="ghost" onclick="delKey(${k.id})">X</button></td></tr>`).join('');
+}
+async function delKey(id){ if(confirm('Supprimer cette cle ?')){ await api('/api/admin/keys/'+id,{method:'DELETE'}); loadKeys(); } }
+async function loadUsers(){
+  const r = await api('/api/admin/users'); if(!r.ok) return;
+  $('#usersBody').innerHTML = r.users.map(u=>`<tr>
+    <td>${u.id}</td><td>${u.username}</td>
+    <td class="mut">${u.hwid?u.hwid.slice(0,16)+'...':'-'}</td>
+    <td class="mut">${u.key||'-'}</td>
+    <td class="mut">${u.expires_at?new Date(u.expires_at).toLocaleDateString():'-'}</td>
+    <td>${u.banned?'<span class="bad">banni</span>':'<span class="ok">actif</span>'}</td>
+    <td class="row">
+      <button class="ghost" onclick="banUser(${u.id},${u.banned?0:1})">${u.banned?'Debannir':'Bannir'}</button>
+      <button class="ghost" onclick="resetHwid(${u.id})">Reset HWID</button>
+      <button class="ghost" onclick="delUser(${u.id})">X</button>
+    </td></tr>`).join('');
+}
+async function banUser(id,b){ await api('/api/admin/users/'+id+'/ban',{method:'POST',body:JSON.stringify({banned:b})}); loadUsers(); }
+async function resetHwid(id){ await api('/api/admin/users/'+id+'/reset-hwid',{method:'POST'}); loadUsers(); }
+async function delUser(id){ if(confirm('Supprimer cet utilisateur ?')){ await api('/api/admin/users/'+id,{method:'DELETE'}); loadUsers(); } }
+
+if(TOKEN) showDash();
+</script>
+</body>
+</html>
